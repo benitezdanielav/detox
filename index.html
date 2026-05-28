@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Mobile Sensor Pads</title>
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  overflow: hidden;
+  touch-action: none;
+  font-family: sans-serif;
+}
+
+.wrapper {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.grid {
+  width: 95vw;
+  height: 95vh;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.pad {
+  background: #111;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 14px;
+  user-select: none;
+}
+
+.pad.active {
+  background: #00ff88;
+  color: #000;
+}
+</style>
+</head>
+
+<body>
+
+<div class="wrapper">
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+// -------- CONFIG --------
+const sounds = Array.from({length:20}, (_,i)=>`audio${i+1}.mp3`)
+const audioBuffers = []
+
+// -------- AUDIO PRELOAD --------
+async function loadSounds() {
+  for (let file of sounds) {
+    const audio = new Audio("audios/" + file)
+    audio.preload = "auto"
+    audioBuffers.push(audio)
+  }
+}
+
+// -------- SENSORES --------
+let motion = { x:0, y:0 }
+let rotation = { gamma:0 }
+
+// suavizado
+function smooth(current, target, factor=0.2) {
+  return current + (target - current) * factor
+}
+
+function initSensors() {
+  window.addEventListener("devicemotion", e => {
+    if (!e.accelerationIncludingGravity) return
+    motion.x = smooth(motion.x, e.accelerationIncludingGravity.x)
+    motion.y = smooth(motion.y, e.accelerationIncludingGravity.y)
+  })
+
+  window.addEventListener("deviceorientation", e => {
+    rotation.gamma = smooth(rotation.gamma, e.gamma || 0)
+  })
+}
+
+// permisos (iOS)
+async function requestPermissions() {
+  try {
+    if (DeviceMotionEvent.requestPermission) {
+      await DeviceMotionEvent.requestPermission()
+      await DeviceOrientationEvent.requestPermission()
+    }
+  } catch(e){}
+}
+
+// -------- FLASH --------
+let track
+
+async function initFlash() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }
+    })
+    track = stream.getVideoTracks()[0]
+  } catch(e){}
+}
+
+function flash(on) {
+  if (!track) return
+  track.applyConstraints({ advanced: [{ torch: on }] })
+}
+
+// -------- UI --------
+const grid = document.getElementById("grid")
+
+sounds.forEach((file, i) => {
+  const pad = document.createElement("div")
+  pad.className = "pad"
+  pad.innerText = i+1
+
+  function play() {
+    const audio = audioBuffers[i].cloneNode()
+
+    // GRUPO 1 (1–5) → acelerómetro
+    if (i < 5) {
+      const force = Math.abs(motion.x) + Math.abs(motion.y)
+      audio.volume = Math.min(force / 15, 1)
+    }
+
+    // GRUPO 2 (6–10) → flash
+    if (i >= 5 && i < 10) {
+      flash(true)
+      setTimeout(() => flash(false), 120)
+    }
+
+    // GRUPO 3 (11–15) → vibración
+    if (i >= 10 && i < 15) {
+      navigator.vibrate?.(80)
+    }
+
+    // GRUPO 4 (16–20) → giroscopio
+    if (i >= 15) {
+      const speed = 1 + rotation.gamma / 90
+      audio.playbackRate = Math.max(0.5, Math.min(speed, 2))
+    }
+
+    audio.play()
+
+    pad.classList.add("active")
+    setTimeout(() => pad.classList.remove("active"), 80)
+  }
+
+  // TOUCH OPTIMIZADO
+  pad.addEventListener("pointerdown", play)
+
+  grid.appendChild(pad)
+})
+
+// -------- INIT --------
+document.body.addEventListener("pointerdown", async () => {
+  await requestPermissions()
+  initSensors()
+  initFlash()
+  loadSounds()
+}, { once: true })
+</script>
+
+</body>
+</html>
